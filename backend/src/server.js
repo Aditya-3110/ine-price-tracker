@@ -178,15 +178,24 @@ app.get("/api/search-products", async (req, res) => {
 
                             await page.waitForTimeout(500);
 
-                            const productUrl = page.url();
+                            const skuNumber = parseInt(
+    product.sku.replace(/\D/g, ""),
+    10
+);
 
-                            results.push({
-                                name: product.name,
-                                brand: product.brand,
-                                sku: product.sku,
-                                url: productUrl
-                            });
+const productId = skuNumber - 10000;
 
+const productUrl =
+    productId > 0
+        ? `${STORE_URL}product/${productId}`
+        : null;
+
+results.push({
+    name: product.name,
+    brand: product.brand,
+    sku: product.sku,
+    url: productUrl
+});
                         } catch (clickError) {
                             console.log(
                                 `Could not open ${product.name}: ${clickError.message}`
