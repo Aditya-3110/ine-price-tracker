@@ -77,9 +77,7 @@ app.get("/api/search-products", async (req, res) => {
     let browser;
 
     try {
-        const query = (req.query.q || "")
-            .trim()
-            .toLowerCase();
+        const query = (req.query.q || "").trim().toLowerCase();
 
         if (!query) {
             return res.json({
@@ -104,7 +102,6 @@ app.get("/api/search-products", async (req, res) => {
         const results = [];
 
         for (let pageNumber = 1; pageNumber <= 50; pageNumber++) {
-
             console.log(`Searching store page ${pageNumber}/50`);
 
             await page.goto(
@@ -115,80 +112,96 @@ app.get("/api/search-products", async (req, res) => {
                 }
             );
 
-            await page.waitForTimeout(1000);
+            await page.waitForTimeout(500);
 
-            const cards = await page.locator(".tile").all();
+            const pageProducts = await page.evaluate(() => {
+                return Array.from(document.querySelectorAll(".tile"))
+                    .map(card => {
+                        const name =
+                            card.querySelector(".tile-name")?.textContent
+                                ?.trim() || "";
 
-            for (let i = 0; i < cards.length; i++) {
+                        const brand =
+                            card.querySelector(".tile-brand")?.textContent
+                                ?.trim() || "";
 
-                const card = cards[i];
+                        const skuText =
+                            card.querySelector(".tile-sku")?.textContent
+                                ?.trim() || "";
 
-                const name = (
-                    await card.locator(".tile-name").innerText()
-                ).trim();
+                        const sku = skuText
+                            .replace(/^SKU\s*/i, "")
+                            .trim();
 
-                const brand = (
-                    await card.locator(".tile-brand").innerText()
-                ).trim();
+                        return {
+                            name,
+                            brand,
+                            sku
+                        };
+                    })
+                    .filter(product => product.name);
+            });
 
-                const skuText = (
-                    await card.locator(".tile-sku").innerText()
-                ).trim();
-
-                const sku = skuText
-                    .replace(/^SKU\s*/i, "")
-                    .trim();
-
+            for (const product of pageProducts) {
                 const matches =
-                    name.toLowerCase().includes(query) ||
-                    brand.toLowerCase().includes(query) ||
-                    sku.toLowerCase().includes(query);
+                    product.name.toLowerCase().includes(query) ||
+                    product.brand.toLowerCase().includes(query) ||
+                    product.sku.toLowerCase().includes(query);
 
                 if (!matches) {
                     continue;
                 }
 
-                const currentUrl = page.url();
+                const cards = page.locator(".tile");
+                const count = await cards.count();
 
-                try {
-                    await card.locator(".tile-cta").click();
+                for (let i = 0; i < count; i++) {
+                    const card = cards.nth(i);
 
-                    await page.waitForTimeout(500);
+                    const name =
+                        await card
+                            .locator(".tile-name")
+                            .textContent()
+                            .catch(() => "");
 
-                    const productUrl = page.url();
+                    if (
+                        name &&
+                        name.trim().toLowerCase() ===
+                            product.name.toLowerCase()
+                    ) {
+                        try {
+                            await card
+                                .locator(".tile-cta")
+                                .click({
+                                    timeout: 5000
+                                });
 
-                    results.push({
-                        name,
-                        brand,
-                        sku,
-                        url:
-                            productUrl !== currentUrl
-                                ? productUrl
-                                : null
-                    });
+                            await page.waitForTimeout(500);
 
-                    if (productUrl !== currentUrl) {
-                        await page.goto(currentUrl, {
-                            waitUntil: "domcontentloaded",
-                            timeout: 60000
-                        });
+                            const productUrl = page.url();
 
-                        await page.waitForTimeout(500);
+                            results.push({
+                                name: product.name,
+                                brand: product.brand,
+                                sku: product.sku,
+                                url: productUrl
+                            });
+
+                        } catch (clickError) {
+                            console.log(
+                                `Could not open ${product.name}: ${clickError.message}`
+                            );
+
+                            results.push({
+                                name: product.name,
+                                brand: product.brand,
+                                sku: product.sku,
+                                url: null
+                            });
+                        }
+
+                        break;
                     }
-
-                } catch (clickError) {
-
-                    console.log(
-                        `Could not open ${name}:`,
-                        clickError.message
-                    );
-
-                    results.push({
-                        name,
-                        brand,
-                        sku,
-                        url: null
-                    });
                 }
             }
 
@@ -214,7 +227,6 @@ app.get("/api/search-products", async (req, res) => {
         });
 
     } catch (error) {
-
         console.error("Product search error:", error);
 
         res.status(500).json({
@@ -224,13 +236,11 @@ app.get("/api/search-products", async (req, res) => {
         });
 
     } finally {
-
         if (browser) {
             await browser.close();
         }
     }
 });
-
 /* =========================
    TRACK PRODUCT
 ========================= */
