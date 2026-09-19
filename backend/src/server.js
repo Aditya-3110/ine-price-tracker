@@ -14,6 +14,8 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
+const STORE_URL = "https://demo.inelabteamdev.com/";
+
 /* =========================
    HEALTH CHECK
 ========================= */
@@ -22,6 +24,17 @@ app.get("/health", (req, res) => {
     res.json({
         success: true,
         message: "INE Price Tracker API is running"
+    });
+});
+
+/* =========================
+   ROOT
+========================= */
+
+app.get("/", (req, res) => {
+    res.json({
+        success: true,
+        message: "INE Price Tracker API"
     });
 });
 
@@ -88,63 +101,120 @@ app.get("/api/search-products", async (req, res) => {
             }
         });
 
-        await page.goto("https://demo.inelabteamdev.com/", {
-            waitUntil: "domcontentloaded",
-            timeout: 60000
-        });
+        const results = [];
 
-        await page.waitForTimeout(3000);
+        for (let pageNumber = 1; pageNumber <= 50; pageNumber++) {
 
-        const products = await page.evaluate(() => {
-            const result = [];
+            console.log(`Searching store page ${pageNumber}/50`);
 
-            const links = Array.from(
-                document.querySelectorAll('a[href*="/product/"]')
+            await page.goto(
+                `${STORE_URL}?page=${pageNumber}`,
+                {
+                    waitUntil: "domcontentloaded",
+                    timeout: 60000
+                }
             );
 
-            for (const link of links) {
-                const href = link.href;
+            await page.waitForTimeout(1000);
 
-                if (!href) continue;
+            const cards = await page.locator(".tile").all();
 
-                const text = link.innerText
-                    .replace(/\s+/g, " ")
+            for (let i = 0; i < cards.length; i++) {
+
+                const card = cards[i];
+
+                const name = (
+                    await card.locator(".tile-name").innerText()
+                ).trim();
+
+                const brand = (
+                    await card.locator(".tile-brand").innerText()
+                ).trim();
+
+                const skuText = (
+                    await card.locator(".tile-sku").innerText()
+                ).trim();
+
+                const sku = skuText
+                    .replace(/^SKU\s*/i, "")
                     .trim();
 
-                if (!text) continue;
+                const matches =
+                    name.toLowerCase().includes(query) ||
+                    brand.toLowerCase().includes(query) ||
+                    sku.toLowerCase().includes(query);
 
-                const match = href.match(/\/product\/([^/?#]+)/);
+                if (!matches) {
+                    continue;
+                }
 
-                if (!match) continue;
+                const currentUrl = page.url();
 
-                result.push({
-                    name: text,
-                    url: href,
-                    productId: match[1]
-                });
+                try {
+                    await card.locator(".tile-cta").click();
+
+                    await page.waitForTimeout(500);
+
+                    const productUrl = page.url();
+
+                    results.push({
+                        name,
+                        brand,
+                        sku,
+                        url:
+                            productUrl !== currentUrl
+                                ? productUrl
+                                : null
+                    });
+
+                    if (productUrl !== currentUrl) {
+                        await page.goto(currentUrl, {
+                            waitUntil: "domcontentloaded",
+                            timeout: 60000
+                        });
+
+                        await page.waitForTimeout(500);
+                    }
+
+                } catch (clickError) {
+
+                    console.log(
+                        `Could not open ${name}:`,
+                        clickError.message
+                    );
+
+                    results.push({
+                        name,
+                        brand,
+                        sku,
+                        url: null
+                    });
+                }
             }
 
-            return result;
-        });
+            if (results.length >= 20) {
+                break;
+            }
+        }
 
-        const uniqueProducts = Array.from(
+        const uniqueResults = Array.from(
             new Map(
-                products.map(product => [product.url, product])
+                results.map(product => [
+                    `${product.name}-${product.sku}`,
+                    product
+                ])
             ).values()
-        );
-
-        const matchedProducts = uniqueProducts.filter(product =>
-            product.name.toLowerCase().includes(query)
         );
 
         res.json({
             success: true,
             query,
-            count: matchedProducts.length,
-            products: matchedProducts.slice(0, 20)
+            count: uniqueResults.length,
+            products: uniqueResults.slice(0, 20)
         });
 
     } catch (error) {
+
         console.error("Product search error:", error);
 
         res.status(500).json({
@@ -154,6 +224,7 @@ app.get("/api/search-products", async (req, res) => {
         });
 
     } finally {
+
         if (browser) {
             await browser.close();
         }
@@ -229,7 +300,7 @@ app.post("/api/products/track", async (req, res) => {
 });
 
 /* =========================
-   PRODUCT PRICE HISTORY
+   PRICE HISTORY
 ========================= */
 
 app.get("/api/products/:id/history", async (req, res) => {
@@ -240,7 +311,9 @@ app.get("/api/products/:id/history", async (req, res) => {
             .from("price_history")
             .select("*")
             .eq("product_id", productId)
-            .order("scraped_at", { ascending: true });
+            .order("scraped_at", {
+                ascending: true
+            });
 
         if (error) {
             return res.status(500).json({
@@ -263,7 +336,7 @@ app.get("/api/products/:id/history", async (req, res) => {
 });
 
 /* =========================
-   PRODUCT SCRAPE LOGS
+   SCRAPE LOGS
 ========================= */
 
 app.get("/api/products/:id/logs", async (req, res) => {
@@ -299,7 +372,7 @@ app.get("/api/products/:id/logs", async (req, res) => {
 });
 
 /* =========================
-   RUN SCRAPE FOR ALL PRODUCTS
+   RUN SCRAPE FOR ALL TRACKED PRODUCTS
 ========================= */
 
 app.post("/scrape/run", async (req, res) => {
@@ -326,9 +399,13 @@ app.post("/scrape/run", async (req, res) => {
         const results = [];
 
         for (const product of products) {
-            console.log(`Scraping: ${product.name}`);
+
+            console.log(
+                `Starting scrape: ${product.name}`
+            );
 
             try {
+
                 const result = await scrapeWithRetry(
                     product.url,
                     3,
@@ -346,6 +423,7 @@ app.post("/scrape/run", async (req, res) => {
                 });
 
             } catch (error) {
+
                 results.push({
                     product_id: product.id,
                     product_name: product.name,
@@ -364,7 +442,11 @@ app.post("/scrape/run", async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Scrape run error:", error);
+
+        console.error(
+            "Scrape run error:",
+            error
+        );
 
         res.status(500).json({
             success: false,
@@ -374,20 +456,11 @@ app.post("/scrape/run", async (req, res) => {
 });
 
 /* =========================
-   ROOT
-========================= */
-
-app.get("/", (req, res) => {
-    res.json({
-        success: true,
-        message: "INE Price Tracker API"
-    });
-});
-
-/* =========================
    START SERVER
 ========================= */
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(
+        `Server running on port ${PORT}`
+    );
 });
