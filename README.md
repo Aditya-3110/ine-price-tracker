@@ -139,8 +139,8 @@ npx playwright install chromium
 
 Create backend/.env:
 
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+SUPABASE_URL=https://reqggjxzvdddjnhqunhd.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=sb_secret_Il_mQylCi52aVf-ySrYAyw_Fkz7rEVM
 
 Start:
 
