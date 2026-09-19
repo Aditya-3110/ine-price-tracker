@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const STORE_URL = "https://demo.inelabteamdev.com";
 
 app.get("/health", (req, res) => {
@@ -409,7 +409,7 @@ app.post("/scrape/run", async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
     console.log(
         `Server running on port ${PORT}`
     );
